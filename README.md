@@ -107,11 +107,10 @@ This is a conceptual project. In a real-world scenario, interfacing with bionic 
 python
 Copy
 
----
 
 ### bionic_eye_controller.py
 
-```
+~~~
 #!/usr/bin/env python3
 import subprocess
 import sys
@@ -346,7 +345,7 @@ if __name__ == '__main__':
             print("Wireless initialization error:", e2)
             print("Unable to initialize any connection. Exiting.")
             sys.exit(1)
-~~~
+
 
     # Start the user command listener in a background thread.
     command_thread = threading.Thread(target=user_command_listener, args=(controller,))
@@ -360,8 +359,10 @@ if __name__ == '__main__':
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nShutting down the Bionic Eye Controller.")
-.gitignore
-gitignore
+
+~~~
+        
+## .gitignore
 
 Copy
 
@@ -388,6 +389,32 @@ Commit and push:
 
 bash
 Copy
+~~~
 git add .
 git commit -m "Initial commit: Add bionic eye controller project with auto-install functionality"
 git push origin main
+~~~
+## License 
+
+MIT License
+
+Copyright (c) 2025 xatusbetazx17
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
