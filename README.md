@@ -190,7 +190,7 @@ except ImportError:
 
 class BionicEyeController:
     """
-    A conceptual controller for a bionic eye device that supports multiple features.
+    A conceptual controller for a bionic eye device.
     This class abstracts the communication interface (USB or wireless). If the expected
     hardware is not found, it falls back to simulation.
     """
@@ -255,7 +255,7 @@ class BionicEyeController:
         else:
             print("Unknown connection type; cannot send command.")
 
-    # --- Feature Methods ---
+    # --- Existing Feature Methods ---
     def change_iris_color(self, color: str):
         command = f"SET_IRIS_COLOR {color}"
         self.send_command(command)
@@ -294,6 +294,22 @@ class BionicEyeController:
             self.send_command(command)
             return "Firmware update from local file initiated."
 
+    # --- New Feature Methods ---
+    def enable_infrared(self, enable: bool = True):
+        command = "INFRARED_ON" if enable else "INFRARED_OFF"
+        self.send_command(command)
+        return "Infrared mode enabled" if enable else "Infrared mode disabled"
+
+    def capture_photo(self):
+        command = "CAPTURE_PHOTO"
+        self.send_command(command)
+        return "Photo captured"
+
+    def check_battery(self):
+        command = "CHECK_BATTERY"
+        self.send_command(command)
+        return "Battery: 85%"
+
 def firmware_update_interface(controller):
     """
     Displays a firmware update sub-menu with two options:
@@ -301,8 +317,7 @@ def firmware_update_interface(controller):
       - Online Update
 
     The user selects one option by dwelling their hand pointer over it.
-    A feedback message is shown and then the interface simulates a minimal reboot
-    (so the user does not lose view while updating).
+    A feedback message is shown and then the interface simulates a minimal reboot.
     If the camera cannot be opened, the update is simulated immediately.
     """
     if cv2 is None or np is None or mp is None:
@@ -316,17 +331,16 @@ def firmware_update_interface(controller):
         time.sleep(2)
         return feedback_message
 
-    # Define sub-menu options
     sub_options = ["Local File", "Online Update"]
     menu_x = 100
     menu_y = 150
     menu_width = 300
     option_height = 50
-    option_dwell_threshold = 1.5  # seconds dwell to select an option
+    option_dwell_threshold = 1.5
     option_dwell_times = {option: None for option in sub_options}
 
     smoothed_pointer = None
-    alpha = 0.3  # smoothing factor
+    alpha = 0.3
 
     feedback_message = ""
     feedback_timestamp = 0
@@ -343,19 +357,16 @@ def firmware_update_interface(controller):
         frame = cv2.flip(frame, 1)
         frame_h, frame_w, _ = frame.shape
 
-        # Process hand landmarks using MediaPipe
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = mp.solutions.hands.Hands(max_num_hands=1).process(image_rgb)
         pointer = None
         if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
-                # Use the index finger tip as the pointer
                 x = hand_landmarks.landmark[8].x * frame_w
                 y = hand_landmarks.landmark[8].y * frame_h
                 pointer = (int(x), int(y))
                 break
 
-        # Smooth pointer
         if pointer is not None:
             if smoothed_pointer is None:
                 smoothed_pointer = pointer
@@ -370,7 +381,6 @@ def firmware_update_interface(controller):
 
         current_time = time.time()
 
-        # Draw sub-menu overlay
         overlay = frame.copy()
         cv2.rectangle(overlay, (menu_x, menu_y), (menu_x + menu_width, menu_y + len(sub_options)*option_height), (50, 50, 50), -1)
         cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
@@ -380,7 +390,6 @@ def firmware_update_interface(controller):
             oy = menu_y + idx * option_height
             cv2.rectangle(frame, (ox, oy), (ox + menu_width, oy + option_height), (100, 100, 100), 1)
             cv2.putText(frame, option, (ox + 10, oy + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-            # Check if pointer is over the option
             if smoothed_pointer is not None and ox <= smoothed_pointer[0] <= ox + menu_width and oy <= smoothed_pointer[1] <= oy + option_height:
                 if option_dwell_times[option] is None:
                     option_dwell_times[option] = current_time
@@ -394,14 +403,13 @@ def firmware_update_interface(controller):
                     elif option == "Online Update":
                         feedback_message = controller.update_firmware(update_method="online")
                     feedback_timestamp = current_time
-                    break  # exit after selection
+                    break
             else:
                 option_dwell_times[option] = None
 
         cv2.putText(frame, "Select Firmware Update Method", (menu_x, menu_y - 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
-        # Display feedback message if any
         if feedback_message and (current_time - feedback_timestamp) < feedback_duration:
             cv2.putText(frame, feedback_message, (menu_x, menu_y + len(sub_options)*option_height + 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
@@ -423,16 +431,16 @@ def firmware_update_interface(controller):
 def hand_control_interface(controller):
     """
     Displays a live camera feed (simulating natural vision) with a toggleable hand-controlled menu.
-
-    - A small toggle region is drawn in the top-right corner. When the user holds their index
-      finger (detected via MediaPipe Hands) in that region for 2 seconds, the menu is toggled.
-    - When open, a scrollable vertical menu (with options such as Change Color, Zoom, Night Vision,
-      Diagnostics, Update) appears. The user can hover over an option with their index finger; if the pointer
-      dwells for 1.5 seconds, the option is selected and the corresponding command is executed.
-    - For "Update", the firmware update sub-menu is launched.
-    - Feedback messages are shown on screen after a change is made and then disappear after a few seconds.
-    - The pointer is smoothed for less jittery movement.
-
+    
+    - A toggle region in the top-right corner lets the user open/close the menu.
+    - When open, a vertical menu with the options below appears.
+    - Available options include:
+         Change Color, Zoom, Night Vision, Infrared, AR Overlay,
+         Capture Photo, Diagnostics, Battery, Update, Custom.
+    - Selecting "Update" launches the firmware update sub-menu.
+    - Feedback messages are displayed after each action.
+    - The pointer (index finger tip) is smoothed for smoother control.
+    
     Press 'q' to exit the interface.
     """
     if cv2 is None or np is None or mp is None:
@@ -450,28 +458,37 @@ def hand_control_interface(controller):
 
     menu_open = False
     menu_toggle_dwell = None
-    menu_toggle_threshold = 2.0  # seconds required to toggle menu
-    # Toggle region: a circle in the top-right corner
-    frame_width, frame_height = 640, 480  # assume these dimensions; adjust if needed
+    menu_toggle_threshold = 2.0
+    frame_width, frame_height = 640, 480
     toggle_region_center = (frame_width - 40, 40)
     toggle_region_radius = 30
 
-    # Define main menu options (vertical list)
-    menu_options = ["Change Color", "Zoom", "Night Vision", "Diagnostics", "Update"]
+    # Updated main menu options with additional features.
+    menu_options = [
+        "Change Color",
+        "Zoom",
+        "Night Vision",
+        "Infrared",
+        "AR Overlay",
+        "Capture Photo",
+        "Diagnostics",
+        "Battery",
+        "Update",
+        "Custom"
+    ]
     menu_x = 50
     menu_y = 100
     menu_width = 200
     option_height = 40
-    option_dwell_threshold = 1.5  # seconds dwell to select an option
+    option_dwell_threshold = 1.5
     option_dwell_times = {option: None for option in menu_options}
 
-    # Feedback message variables
     feedback_message = ""
     feedback_timestamp = 0
-    feedback_duration = 3.0  # seconds to display feedback
+    feedback_duration = 3.0
 
     smoothed_pointer = None
-    alpha = 0.3  # smoothing factor
+    alpha = 0.3
 
     while True:
         ret, frame = cap.read()
@@ -479,25 +496,21 @@ def hand_control_interface(controller):
             print("Failed to capture frame from camera.")
             break
 
-        frame = cv2.flip(frame, 1)  # mirror the view
+        frame = cv2.flip(frame, 1)
         frame_h, frame_w, _ = frame.shape
 
-        # Process hand landmarks using MediaPipe
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = hands.process(image_rgb)
         pointer = None
 
         if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
-                # Draw landmarks for debugging
                 mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-                # Use the index finger tip (landmark 8) as the pointer
                 x = hand_landmarks.landmark[8].x * frame_w
                 y = hand_landmarks.landmark[8].y * frame_h
                 pointer = (int(x), int(y))
-                break  # use first detected hand
+                break
 
-        # Smooth the pointer position
         if pointer is not None:
             if smoothed_pointer is None:
                 smoothed_pointer = pointer
@@ -512,12 +525,10 @@ def hand_control_interface(controller):
 
         current_time = time.time()
 
-        # Draw toggle region for the menu (top-right)
         cv2.circle(frame, toggle_region_center, toggle_region_radius, (200, 200, 200), 2)
         cv2.putText(frame, "Menu", (toggle_region_center[0] - 30, toggle_region_center[1] + 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
-        # Check if pointer is inside the toggle region
         if smoothed_pointer is not None:
             dx = smoothed_pointer[0] - toggle_region_center[0]
             dy = smoothed_pointer[1] - toggle_region_center[1]
@@ -526,7 +537,6 @@ def hand_control_interface(controller):
                 if menu_toggle_dwell is None:
                     menu_toggle_dwell = current_time
                 dwell = current_time - menu_toggle_dwell
-                # Draw progress (arc) on the toggle region
                 progress_angle = int((dwell / menu_toggle_threshold) * 360)
                 cv2.ellipse(frame, toggle_region_center, (toggle_region_radius, toggle_region_radius), 0, 0, progress_angle, (0, 255, 0), 2)
                 if dwell >= menu_toggle_threshold:
@@ -536,7 +546,6 @@ def hand_control_interface(controller):
             else:
                 menu_toggle_dwell = None
 
-        # If menu is open, display the scrollable menu overlay
         if menu_open:
             overlay = frame.copy()
             cv2.rectangle(overlay, (menu_x, menu_y), (menu_x + menu_width, menu_y + len(menu_options)*option_height), (50, 50, 50), -1)
@@ -547,7 +556,6 @@ def hand_control_interface(controller):
                 oy = menu_y + idx * option_height
                 cv2.rectangle(frame, (ox, oy), (ox + menu_width, oy + option_height), (100, 100, 100), 1)
                 cv2.putText(frame, option, (ox + 5, oy + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                # Check if pointer is over the option
                 if smoothed_pointer is not None and ox <= smoothed_pointer[0] <= ox + menu_width and oy <= smoothed_pointer[1] <= oy + option_height:
                     if option_dwell_times[option] is None:
                         option_dwell_times[option] = current_time
@@ -558,7 +566,7 @@ def hand_control_interface(controller):
                     if option_dwell >= option_dwell_threshold:
                         print(f"Option selected: {option}")
                         if option == "Change Color":
-                            controller.change_iris_color("#FF0000")  # Add cycling logic as needed
+                            controller.change_iris_color("#FF0000")
                             feedback_message = "Iris color changed to #FF0000"
                         elif option == "Zoom":
                             controller.set_zoom_level(2.0)
@@ -566,22 +574,34 @@ def hand_control_interface(controller):
                         elif option == "Night Vision":
                             controller.enable_night_vision(True)
                             feedback_message = "Night vision enabled"
+                        elif option == "Infrared":
+                            # Toggle infrared mode; for simplicity, always enable it here.
+                            controller.enable_infrared(True)
+                            feedback_message = "Infrared mode enabled"
+                        elif option == "AR Overlay":
+                            controller.activate_AR_overlay("Default AR Overlay")
+                            feedback_message = "AR overlay activated"
+                        elif option == "Capture Photo":
+                            feedback_message = controller.capture_photo()
                         elif option == "Diagnostics":
                             diag = controller.system_diagnostics()
                             print(diag)
                             feedback_message = diag
+                        elif option == "Battery":
+                            feedback_message = controller.check_battery()
                         elif option == "Update":
                             feedback_message = "Launching firmware update interface..."
-                            # Launch firmware update sub-menu
                             firmware_update_interface(controller)
                             feedback_message = "Firmware update completed. Restarting view..."
+                        elif option == "Custom":
+                            controller.run_custom_function("CUSTOM_COMMAND")
+                            feedback_message = "Custom function executed"
                         menu_open = False
                         option_dwell_times = {opt: None for opt in menu_options}
                         feedback_timestamp = current_time
                 else:
                     option_dwell_times[option] = None
 
-        # Display feedback message if available
         if feedback_message and (current_time - feedback_timestamp) < feedback_duration:
             cv2.putText(frame, feedback_message, (50, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         elif current_time - feedback_timestamp >= feedback_duration:
@@ -599,7 +619,6 @@ if __name__ == '__main__':
     controller = BionicEyeController(connection_type='usb', debug=False)
     # Start the hand-controlled interface with a toggleable, scrollable menu
     hand_control_interface(controller)
-
 
 ~~~
         
