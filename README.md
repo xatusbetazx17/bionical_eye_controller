@@ -177,44 +177,62 @@ except ImportError:
         print("numpy not installed. Camera boot screen will be simulated.", e)
         np = None
 
+# Auto-install and import MediaPipe for hand tracking
+try:
+    import mediapipe as mp
+except ImportError:
+    install_package("mediapipe")
+    try:
+        import mediapipe as mp
+    except ImportError as e:
+        print("mediapipe not installed. Hand control interface will be simulated.", e)
+        mp = None
+
 class BionicEyeController:
     """
     A conceptual controller for a bionic eye device that supports multiple features.
     This class abstracts the communication interface (USB or wireless). If the expected
     hardware is not found, it falls back to simulation.
     """
-
-    def __init__(self, connection_type='usb', port=None):
+    def __init__(self, connection_type='usb', port=None, debug=True):
         self.connection_type = connection_type
+        self.debug = debug
 
         if self.connection_type == 'usb':
             if usb is None:
-                print("USB module not available; simulating USB connection.")
+                if self.debug:
+                    print("USB module not available; simulating USB connection.")
                 self.device = None
             else:
                 self.device = usb.core.find(idVendor=0x1234, idProduct=0x5678)
                 if self.device is None:
-                    print("USB device not found. Simulating USB connection.")
+                    if self.debug:
+                        print("USB device not found. Simulating USB connection.")
                     self.device = None
                 else:
                     try:
                         self.device.set_configuration()
-                        print("USB device initialized.")
+                        if self.debug:
+                            print("USB device initialized.")
                     except Exception as e:
-                        print("Failed to set USB configuration. Simulating USB connection:", e)
+                        if self.debug:
+                            print("Failed to set USB configuration. Simulating USB connection:", e)
                         self.device = None
         elif self.connection_type == 'wireless':
             if serial is None:
-                print("Serial module not available; simulating wireless connection.")
+                if self.debug:
+                    print("Serial module not available; simulating wireless connection.")
                 self.ser = None
             else:
                 if port is None:
                     port = '/dev/ttyUSB0'
                 try:
                     self.ser = serial.Serial(port, baudrate=115200, timeout=1)
-                    print("Wireless device initialized on port:", port)
+                    if self.debug:
+                        print("Wireless device initialized on port:", port)
                 except Exception as e:
-                    print("Wireless device initialization failed. Simulating wireless connection:", e)
+                    if self.debug:
+                        print("Wireless device initialization failed. Simulating wireless connection:", e)
                     self.ser = None
         else:
             raise ValueError("Unsupported connection type: " + self.connection_type)
@@ -228,7 +246,6 @@ class BionicEyeController:
                 print(f"[USB Simulation] Command sent: {command}")
             else:
                 print(f"[USB] Sending command: {command}")
-                # Example: self.device.write(endpoint, command.encode('ascii'))
         elif self.connection_type == 'wireless':
             if self.ser is None:
                 print(f"[Wireless Simulation] Command sent: {command}")
@@ -264,44 +281,57 @@ class BionicEyeController:
         self.send_command(command)
         return "Diagnostics: All systems nominal."
 
-def eye_control_interface(controller):
+    def update_firmware(self):
+        command = "UPDATE_FIRMWARE"
+        self.send_command(command)
+        return "Firmware update initiated."
+
+def hand_control_interface(controller):
     """
-    Displays a live camera feed with an overlaid eye-controlled UI.
-    Four buttons (Change Color, Zoom, Night Vision, Diagnostics) are drawn on the right.
-    If the user’s gaze (detected via a Haar cascade) dwells over a button for 2 seconds,
-    the corresponding command is triggered.
+    Displays a live camera feed (simulating natural vision) with a toggleable hand-controlled menu.
+
+    - A small toggle region is drawn in the top-right corner. When the user holds their index
+      finger (detected via MediaPipe Hands) in that region for 2 seconds, the menu is toggled.
+    - When open, a scrollable vertical menu (with options such as Change Color, Zoom, Night Vision,
+      Diagnostics, Update) appears. The user can hover over an option with their index finger; if the pointer
+      dwells for 1.5 seconds, the option is selected and the corresponding command is executed.
+    - The menu then hides, allowing the user to continue with a natural view.
+    - The pointer is smoothed for less jittery movement.
+
     Press 'q' to exit the interface.
     """
-    if cv2 is None or np is None:
-        print("Camera interface libraries not available. Cannot start eye control interface.")
+    if cv2 is None or np is None or mp is None:
+        print("Necessary libraries not available. Cannot start hand control interface.")
         return
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        print("Cannot open camera for eye control interface.")
+        print("Cannot open camera for hand control interface.")
         return
 
-    # Load Haar cascade for eye detection
-    eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+    mp_hands = mp.solutions.hands
+    hands = mp_hands.Hands(max_num_hands=1)
+    mp_drawing = mp.solutions.drawing_utils
 
-    # Define UI buttons: label and rectangle (x, y, width, height)
-    buttons = {
-        "Change Color": (480, 50, 150, 50),
-        "Zoom": (480, 120, 150, 50),
-        "Night Vision": (480, 190, 150, 50),
-        "Diagnostics": (480, 260, 150, 50)
-    }
-    dwell_threshold = 2.0  # seconds required to trigger a button
-    dwell_times = {label: None for label in buttons}
+    menu_open = False
+    menu_toggle_dwell = None
+    menu_toggle_threshold = 2.0  # seconds required to toggle menu
+    # Toggle region: a circle in the top-right corner
+    frame_width, frame_height = 640, 480  # assume these dimensions; adjust if needed
+    toggle_region_center = (frame_width - 40, 40)
+    toggle_region_radius = 30
 
-    # State variables for cycling options
-    color_options = ["#FF0000", "#00FF00", "#0000FF", "#FFFF00"]
-    current_color_index = 0
-    zoom_options = [1.0, 1.5, 2.0]
-    current_zoom_index = 0
-    night_vision_on = False
-    diagnostics_message = ""
-    diagnostics_timestamp = 0
+    # Define menu options (vertical list)
+    menu_options = ["Change Color", "Zoom", "Night Vision", "Diagnostics", "Update"]
+    menu_x = 50
+    menu_y = 100
+    menu_width = 200
+    option_height = 40
+    option_dwell_threshold = 1.5  # seconds dwell to select an option
+    option_dwell_times = {option: None for option in menu_options}
+
+    smoothed_pointer = None
+    alpha = 0.3  # smoothing factor
 
     while True:
         ret, frame = cap.read()
@@ -309,62 +339,102 @@ def eye_control_interface(controller):
             print("Failed to capture frame from camera.")
             break
 
-        # Flip frame horizontally (mirror effect)
-        frame = cv2.flip(frame, 1)
+        frame = cv2.flip(frame, 1)  # mirror the view
+        frame_h, frame_w, _ = frame.shape
 
-        # Convert to grayscale for eye detection
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        eyes = eye_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-        eye_center = None
-        if len(eyes) > 0:
-            cx = sum([ex + ew / 2 for (ex, ey, ew, eh) in eyes]) / len(eyes)
-            cy = sum([ey + eh / 2 for (ex, ey, ew, eh) in eyes]) / len(eyes)
-            eye_center = (int(cx), int(cy))
-            cv2.circle(frame, eye_center, 5, (0, 255, 0), -1)
+        # Process hand landmarks using MediaPipe
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = hands.process(image_rgb)
+        pointer = None
+
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                # Draw landmarks for debugging
+                mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                # Use the index finger tip (landmark 8) as the pointer
+                x = hand_landmarks.landmark[8].x * frame_w
+                y = hand_landmarks.landmark[8].y * frame_h
+                pointer = (int(x), int(y))
+                break  # use first detected hand
+
+        # Smooth the pointer position
+        if pointer is not None:
+            if smoothed_pointer is None:
+                smoothed_pointer = pointer
+            else:
+                smoothed_pointer = (
+                    int(alpha * pointer[0] + (1 - alpha) * smoothed_pointer[0]),
+                    int(alpha * pointer[1] + (1 - alpha) * smoothed_pointer[1])
+                )
+            cv2.circle(frame, smoothed_pointer, 5, (0, 255, 0), -1)
+        else:
+            smoothed_pointer = None
 
         current_time = time.time()
-        # Process each button
-        for label, (x, y, w, h) in buttons.items():
-            # Draw button border
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (50, 50, 50), 2)
-            # Check if eye center is within this button
-            if eye_center is not None and x <= eye_center[0] <= x + w and y <= eye_center[1] <= y + h:
-                if dwell_times[label] is None:
-                    dwell_times[label] = current_time
-                dwell_duration = current_time - dwell_times[label]
-                # Draw progress indicator on the button
-                progress_width = int((dwell_duration / dwell_threshold) * w)
-                progress_width = min(progress_width, w)
-                cv2.rectangle(frame, (x, y), (x + progress_width, y + h), (0, 255, 0), -1)
-                # Trigger action if dwell time exceeds threshold
-                if dwell_duration >= dwell_threshold:
-                    print(f"Action triggered for: {label}")
-                    if label == "Change Color":
-                        current_color_index = (current_color_index + 1) % len(color_options)
-                        controller.change_iris_color(color_options[current_color_index])
-                    elif label == "Zoom":
-                        current_zoom_index = (current_zoom_index + 1) % len(zoom_options)
-                        controller.set_zoom_level(zoom_options[current_zoom_index])
-                    elif label == "Night Vision":
-                        night_vision_on = not night_vision_on
-                        controller.enable_night_vision(night_vision_on)
-                    elif label == "Diagnostics":
-                        diagnostics_message = controller.system_diagnostics()
-                        diagnostics_timestamp = current_time
-                    dwell_times[label] = None  # reset dwell timer
+
+        # Draw toggle region for the menu (top-right)
+        cv2.circle(frame, toggle_region_center, toggle_region_radius, (200, 200, 200), 2)
+        cv2.putText(frame, "Menu", (toggle_region_center[0] - 30, toggle_region_center[1] + 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+        # Check if pointer is inside the toggle region
+        if smoothed_pointer is not None:
+            dx = smoothed_pointer[0] - toggle_region_center[0]
+            dy = smoothed_pointer[1] - toggle_region_center[1]
+            dist = (dx*dx + dy*dy) ** 0.5
+            if dist <= toggle_region_radius:
+                if menu_toggle_dwell is None:
+                    menu_toggle_dwell = current_time
+                dwell = current_time - menu_toggle_dwell
+                # Draw progress (arc) on the toggle region
+                progress_angle = int((dwell / menu_toggle_threshold) * 360)
+                cv2.ellipse(frame, toggle_region_center, (toggle_region_radius, toggle_region_radius), 0, 0, progress_angle, (0, 255, 0), 2)
+                if dwell >= menu_toggle_threshold:
+                    menu_open = not menu_open
+                    menu_toggle_dwell = None
+                    option_dwell_times = {option: None for option in menu_options}
             else:
-                dwell_times[label] = None
+                menu_toggle_dwell = None
 
-            # Draw button label
-            cv2.putText(frame, label, (x + 5, y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+        # If menu is open, display the scrollable menu overlay
+        if menu_open:
+            # Draw a semi-transparent rectangle as menu background
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (menu_x, menu_y), (menu_x + menu_width, menu_y + len(menu_options) * option_height), (50, 50, 50), -1)
+            cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
 
-        # Display diagnostics message for 3 seconds if available
-        if diagnostics_message and (current_time - diagnostics_timestamp) < 3:
-            cv2.putText(frame, diagnostics_message, (50, 450), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-        elif current_time - diagnostics_timestamp >= 3:
-            diagnostics_message = ""
+            # Draw each menu option and check for pointer dwell
+            for idx, option in enumerate(menu_options):
+                ox = menu_x
+                oy = menu_y + idx * option_height
+                cv2.rectangle(frame, (ox, oy), (ox + menu_width, oy + option_height), (100, 100, 100), 1)
+                cv2.putText(frame, option, (ox + 5, oy + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                # Check if pointer is over the option
+                if smoothed_pointer is not None and ox <= smoothed_pointer[0] <= ox + menu_width and oy <= smoothed_pointer[1] <= oy + option_height:
+                    if option_dwell_times[option] is None:
+                        option_dwell_times[option] = current_time
+                    option_dwell = current_time - option_dwell_times[option]
+                    prog_width = int((option_dwell / option_dwell_threshold) * menu_width)
+                    prog_width = min(prog_width, menu_width)
+                    cv2.rectangle(frame, (ox, oy), (ox + prog_width, oy + option_height), (0, 255, 0), -1)
+                    if option_dwell >= option_dwell_threshold:
+                        print(f"Option selected: {option}")
+                        if option == "Change Color":
+                            controller.change_iris_color("#FF0000")  # You can add cycling logic here
+                        elif option == "Zoom":
+                            controller.set_zoom_level(2.0)
+                        elif option == "Night Vision":
+                            controller.enable_night_vision(True)
+                        elif option == "Diagnostics":
+                            print(controller.system_diagnostics())
+                        elif option == "Update":
+                            print(controller.update_firmware())
+                        menu_open = False  # Close menu after selection
+                        option_dwell_times = {opt: None for opt in menu_options}
+                else:
+                    option_dwell_times[option] = None
 
-        cv2.imshow("Eye Control Interface", frame)
+        cv2.imshow("Hand Control Interface", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
@@ -372,11 +442,11 @@ def eye_control_interface(controller):
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    # Initialize the bionic eye controller (in simulation mode if hardware is missing)
-    controller = BionicEyeController(connection_type='usb')
-    # Start the eye-controlled interface
-    eye_control_interface(controller)
-
+    # Initialize the bionic eye controller (simulation mode if hardware is missing)
+    # Set debug=False if you do not want to see simulation messages.
+    controller = BionicEyeController(connection_type='usb', debug=False)
+    # Start the hand-controlled interface with a toggleable, scrollable menu
+    hand_control_interface(controller)
 
 ~~~
         
