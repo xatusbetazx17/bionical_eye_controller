@@ -296,6 +296,7 @@ def hand_control_interface(controller):
       Diagnostics, Update) appears. The user can hover over an option with their index finger; if the pointer
       dwells for 1.5 seconds, the option is selected and the corresponding command is executed.
     - The menu then hides, allowing the user to continue with a natural view.
+    - Feedback messages are shown on screen after a change is made and then disappear after a few seconds.
     - The pointer is smoothed for less jittery movement.
 
     Press 'q' to exit the interface.
@@ -329,6 +330,11 @@ def hand_control_interface(controller):
     option_height = 40
     option_dwell_threshold = 1.5  # seconds dwell to select an option
     option_dwell_times = {option: None for option in menu_options}
+
+    # Variables for displaying feedback messages
+    feedback_message = ""
+    feedback_timestamp = 0
+    feedback_duration = 3.0  # seconds to display the feedback
 
     smoothed_pointer = None
     alpha = 0.3  # smoothing factor
@@ -421,18 +427,32 @@ def hand_control_interface(controller):
                         print(f"Option selected: {option}")
                         if option == "Change Color":
                             controller.change_iris_color("#FF0000")  # You can add cycling logic here
+                            feedback_message = "Iris color changed to #FF0000"
                         elif option == "Zoom":
                             controller.set_zoom_level(2.0)
+                            feedback_message = "Zoom set to 2.0"
                         elif option == "Night Vision":
                             controller.enable_night_vision(True)
+                            feedback_message = "Night vision enabled"
                         elif option == "Diagnostics":
-                            print(controller.system_diagnostics())
+                            diag = controller.system_diagnostics()
+                            print(diag)
+                            feedback_message = diag
                         elif option == "Update":
-                            print(controller.update_firmware())
+                            upd = controller.update_firmware()
+                            print(upd)
+                            feedback_message = upd
                         menu_open = False  # Close menu after selection
                         option_dwell_times = {opt: None for opt in menu_options}
+                        feedback_timestamp = current_time
                 else:
                     option_dwell_times[option] = None
+
+        # Display feedback message (if any) for a limited duration
+        if feedback_message and (current_time - feedback_timestamp) < feedback_duration:
+            cv2.putText(frame, feedback_message, (50, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        elif current_time - feedback_timestamp >= feedback_duration:
+            feedback_message = ""
 
         cv2.imshow("Hand Control Interface", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -443,7 +463,7 @@ def hand_control_interface(controller):
 
 if __name__ == '__main__':
     # Initialize the bionic eye controller (simulation mode if hardware is missing)
-    # Set debug=False if you do not want to see simulation messages.
+    # Set debug=False to suppress simulation messages.
     controller = BionicEyeController(connection_type='usb', debug=False)
     # Start the hand-controlled interface with a toggleable, scrollable menu
     hand_control_interface(controller)
