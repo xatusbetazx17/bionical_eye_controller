@@ -264,105 +264,107 @@ class BionicEyeController:
         self.send_command(command)
         return "Diagnostics: All systems nominal."
 
-def user_command_listener(controller: BionicEyeController):
+def eye_control_interface(controller):
     """
-    A simple command-line interface running in a background thread,
-    allowing the user to control the bionic eye device.
-    """
-    print("Bionic Eye Controller is running.")
-    print("Enter commands (type 'help' for a list, 'exit' to quit).")
-    while True:
-        try:
-            user_input = input(">> ").strip()
-            if user_input.lower() in ['exit', 'quit']:
-                break
-            elif user_input.lower() == 'help':
-                print("Available commands:")
-                print("  change_color [color]      -- Change iris color (e.g., change_color #FF0000)")
-                print("  zoom [level]              -- Set optical zoom level (e.g., zoom 2.5)")
-                print("  night [on/off]            -- Enable or disable night vision")
-                print("  ar [overlay_data]         -- Activate an AR overlay with specified data")
-                print("  diag                      -- Run system diagnostics")
-                print("  custom [function_code]    -- Run a custom function on the device")
-            elif user_input.startswith("change_color"):
-                parts = user_input.split()
-                if len(parts) >= 2:
-                    controller.change_iris_color(parts[1])
-                else:
-                    print("Usage: change_color [color]")
-            elif user_input.startswith("zoom"):
-                parts = user_input.split()
-                if len(parts) >= 2:
-                    try:
-                        level = float(parts[1])
-                        controller.set_zoom_level(level)
-                    except ValueError:
-                        print("Invalid zoom level. Must be a number.")
-                else:
-                    print("Usage: zoom [level]")
-            elif user_input.startswith("night"):
-                parts = user_input.split()
-                if len(parts) >= 2:
-                    if parts[1].lower() == 'on':
-                        controller.enable_night_vision(True)
-                    elif parts[1].lower() == 'off':
-                        controller.enable_night_vision(False)
-                    else:
-                        print("Usage: night [on/off]")
-                else:
-                    print("Usage: night [on/off]")
-            elif user_input.startswith("ar"):
-                parts = user_input.split(maxsplit=1)
-                if len(parts) >= 2:
-                    controller.activate_AR_overlay(parts[1])
-                else:
-                    print("Usage: ar [overlay_data]")
-            elif user_input.lower() == "diag":
-                print(controller.system_diagnostics())
-            elif user_input.startswith("custom"):
-                parts = user_input.split(maxsplit=1)
-                if len(parts) >= 2:
-                    controller.run_custom_function(parts[1])
-                else:
-                    print("Usage: custom [function_code]")
-            else:
-                print("Unknown command. Type 'help' for available commands.")
-        except EOFError:
-            break
-        except Exception as e:
-            print("Error:", e)
-
-def start_camera_interface():
-    """
-    Simulate the bionic eye's visual interface by first showing a boot screen
-    and then displaying a live camera feed.
-    Press 'q' in the camera window to exit the interface.
+    Displays a live camera feed with an overlaid eye-controlled UI.
+    Four buttons (Change Color, Zoom, Night Vision, Diagnostics) are drawn on the right.
+    If the user’s gaze (detected via a Haar cascade) dwells over a button for 2 seconds,
+    the corresponding command is triggered.
+    Press 'q' to exit the interface.
     """
     if cv2 is None or np is None:
-        print("Camera interface libraries not available. Cannot start camera interface.")
+        print("Camera interface libraries not available. Cannot start eye control interface.")
         return
 
-    # Boot screen simulation
-    boot_screen = 255 * np.ones((480, 640, 3), dtype=np.uint8)
-    cv2.putText(boot_screen, "Booting Bionic Eye OS...", (30, 240),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2, cv2.LINE_AA)
-    cv2.imshow("Bionic Eye OS", boot_screen)
-    cv2.waitKey(3000)  # Display boot screen for 3 seconds
-    cv2.destroyWindow("Bionic Eye OS")
-
-    # Start camera feed
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        print("Cannot open camera. Exiting camera interface.")
+        print("Cannot open camera for eye control interface.")
         return
 
-    print("Camera interface started. Press 'q' in the window to exit.")
+    # Load Haar cascade for eye detection
+    eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+
+    # Define UI buttons: label and rectangle (x, y, width, height)
+    buttons = {
+        "Change Color": (480, 50, 150, 50),
+        "Zoom": (480, 120, 150, 50),
+        "Night Vision": (480, 190, 150, 50),
+        "Diagnostics": (480, 260, 150, 50)
+    }
+    dwell_threshold = 2.0  # seconds required to trigger a button
+    dwell_times = {label: None for label in buttons}
+
+    # State variables for cycling options
+    color_options = ["#FF0000", "#00FF00", "#0000FF", "#FFFF00"]
+    current_color_index = 0
+    zoom_options = [1.0, 1.5, 2.0]
+    current_zoom_index = 0
+    night_vision_on = False
+    diagnostics_message = ""
+    diagnostics_timestamp = 0
+
     while True:
         ret, frame = cap.read()
         if not ret:
             print("Failed to capture frame from camera.")
             break
-        cv2.imshow("Bionic Eye Vision", frame)
+
+        # Flip frame horizontally (mirror effect)
+        frame = cv2.flip(frame, 1)
+
+        # Convert to grayscale for eye detection
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        eyes = eye_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        eye_center = None
+        if len(eyes) > 0:
+            cx = sum([ex + ew / 2 for (ex, ey, ew, eh) in eyes]) / len(eyes)
+            cy = sum([ey + eh / 2 for (ex, ey, ew, eh) in eyes]) / len(eyes)
+            eye_center = (int(cx), int(cy))
+            cv2.circle(frame, eye_center, 5, (0, 255, 0), -1)
+
+        current_time = time.time()
+        # Process each button
+        for label, (x, y, w, h) in buttons.items():
+            # Draw button border
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (50, 50, 50), 2)
+            # Check if eye center is within this button
+            if eye_center is not None and x <= eye_center[0] <= x + w and y <= eye_center[1] <= y + h:
+                if dwell_times[label] is None:
+                    dwell_times[label] = current_time
+                dwell_duration = current_time - dwell_times[label]
+                # Draw progress indicator on the button
+                progress_width = int((dwell_duration / dwell_threshold) * w)
+                progress_width = min(progress_width, w)
+                cv2.rectangle(frame, (x, y), (x + progress_width, y + h), (0, 255, 0), -1)
+                # Trigger action if dwell time exceeds threshold
+                if dwell_duration >= dwell_threshold:
+                    print(f"Action triggered for: {label}")
+                    if label == "Change Color":
+                        current_color_index = (current_color_index + 1) % len(color_options)
+                        controller.change_iris_color(color_options[current_color_index])
+                    elif label == "Zoom":
+                        current_zoom_index = (current_zoom_index + 1) % len(zoom_options)
+                        controller.set_zoom_level(zoom_options[current_zoom_index])
+                    elif label == "Night Vision":
+                        night_vision_on = not night_vision_on
+                        controller.enable_night_vision(night_vision_on)
+                    elif label == "Diagnostics":
+                        diagnostics_message = controller.system_diagnostics()
+                        diagnostics_timestamp = current_time
+                    dwell_times[label] = None  # reset dwell timer
+            else:
+                dwell_times[label] = None
+
+            # Draw button label
+            cv2.putText(frame, label, (x + 5, y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+
+        # Display diagnostics message for 3 seconds if available
+        if diagnostics_message and (current_time - diagnostics_timestamp) < 3:
+            cv2.putText(frame, diagnostics_message, (50, 450), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        elif current_time - diagnostics_timestamp >= 3:
+            diagnostics_message = ""
+
+        cv2.imshow("Eye Control Interface", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
@@ -370,27 +372,11 @@ def start_camera_interface():
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    # Initialize the bionic eye controller in simulation mode (if hardware is missing)
+    # Initialize the bionic eye controller (in simulation mode if hardware is missing)
     controller = BionicEyeController(connection_type='usb')
-    # (The __init__ method now prints simulation messages instead of raising errors.)
+    # Start the eye-controlled interface
+    eye_control_interface(controller)
 
-    # Start the command-line interface in a background thread.
-    command_thread = threading.Thread(target=user_command_listener, args=(controller,))
-    command_thread.daemon = True
-    command_thread.start()
-
-    # Start the camera interface (this simulates the user's vision when the OS boots up)
-    if cv2 is not None and np is not None:
-        camera_thread = threading.Thread(target=start_camera_interface)
-        camera_thread.daemon = True
-        camera_thread.start()
-
-    # Main loop: wait until the command thread finishes
-    try:
-        while command_thread.is_alive():
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\nShutting down the Bionic Eye Controller.")
 
 ~~~
         
