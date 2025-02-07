@@ -131,7 +131,7 @@ def install_package(package_name):
     except subprocess.CalledProcessError as e:
         print(f"Failed to install {package_name}: {e}")
 
-# Try importing PyUSB; if not available, attempt auto-install.
+# Auto-install and import PyUSB
 try:
     import usb.core
     import usb.util
@@ -142,9 +142,9 @@ except ImportError:
         import usb.util
     except ImportError as e:
         print("PyUSB not installed. USB functionality will be simulated.", e)
-        usb = None  # Flag to simulate USB functionality
+        usb = None
 
-# Try importing PySerial; if not available, attempt auto-install.
+# Auto-install and import PySerial
 try:
     import serial
 except ImportError:
@@ -153,12 +153,35 @@ except ImportError:
         import serial
     except ImportError as e:
         print("PySerial not installed. Wireless functionality will be simulated.", e)
-        serial = None  # Flag to simulate wireless functionality
+        serial = None
+
+# Auto-install and import OpenCV (cv2)
+try:
+    import cv2
+except ImportError:
+    install_package("opencv-python")
+    try:
+        import cv2
+    except ImportError as e:
+        print("cv2 (opencv-python) not installed. Camera interface will be simulated.", e)
+        cv2 = None
+
+# Auto-install and import numpy
+try:
+    import numpy as np
+except ImportError:
+    install_package("numpy")
+    try:
+        import numpy as np
+    except ImportError as e:
+        print("numpy not installed. Camera boot screen will be simulated.", e)
+        np = None
 
 class BionicEyeController:
     """
     A conceptual controller for a bionic eye device that supports multiple features.
-    This class abstracts the communication interface (USB or wireless).
+    This class abstracts the communication interface (USB or wireless). If the expected
+    hardware is not found, it falls back to simulation.
     """
 
     def __init__(self, connection_type='usb', port=None):
@@ -169,29 +192,30 @@ class BionicEyeController:
                 print("USB module not available; simulating USB connection.")
                 self.device = None
             else:
-                # Attempt to find the USB device (dummy vendor/product IDs for illustration)
                 self.device = usb.core.find(idVendor=0x1234, idProduct=0x5678)
                 if self.device is None:
-                    raise ValueError("USB device not found. (This is a simulated error for this example.)")
-                # In a real scenario, you would configure endpoints and interfaces here.
-                try:
-                    self.device.set_configuration()
-                    print("USB device initialized.")
-                except Exception as e:
-                    raise ValueError("Failed to set USB configuration: " + str(e))
+                    print("USB device not found. Simulating USB connection.")
+                    self.device = None
+                else:
+                    try:
+                        self.device.set_configuration()
+                        print("USB device initialized.")
+                    except Exception as e:
+                        print("Failed to set USB configuration. Simulating USB connection:", e)
+                        self.device = None
         elif self.connection_type == 'wireless':
             if serial is None:
                 print("Serial module not available; simulating wireless connection.")
                 self.ser = None
             else:
-                # Open a serial connection (adjust the port and baud rate as needed)
                 if port is None:
                     port = '/dev/ttyUSB0'
                 try:
                     self.ser = serial.Serial(port, baudrate=115200, timeout=1)
                     print("Wireless device initialized on port:", port)
                 except Exception as e:
-                    raise ValueError("Wireless device initialization failed: " + str(e))
+                    print("Wireless device initialization failed. Simulating wireless connection:", e)
+                    self.ser = None
         else:
             raise ValueError("Unsupported connection type: " + self.connection_type)
 
@@ -203,7 +227,6 @@ class BionicEyeController:
             if self.device is None:
                 print(f"[USB Simulation] Command sent: {command}")
             else:
-                # In a real implementation, write to a USB endpoint.
                 print(f"[USB] Sending command: {command}")
                 # Example: self.device.write(endpoint, command.encode('ascii'))
         elif self.connection_type == 'wireless':
@@ -216,49 +239,29 @@ class BionicEyeController:
             print("Unknown connection type; cannot send command.")
 
     # --- Feature Methods ---
-
     def change_iris_color(self, color: str):
-        """
-        Change the iris color.
-        """
         command = f"SET_IRIS_COLOR {color}"
         self.send_command(command)
 
     def set_zoom_level(self, level: float):
-        """
-        Adjust the optical zoom.
-        """
         command = f"SET_ZOOM {level}"
         self.send_command(command)
 
     def enable_night_vision(self, enable: bool = True):
-        """
-        Enable or disable night vision mode.
-        """
         command = "NIGHT_VISION ON" if enable else "NIGHT_VISION OFF"
         self.send_command(command)
 
     def activate_AR_overlay(self, overlay_data: str):
-        """
-        Activate an augmented reality overlay.
-        """
         command = f"ACTIVATE_AR {overlay_data}"
         self.send_command(command)
 
     def run_custom_function(self, function_code: str):
-        """
-        Run a custom function on the bionic eye device.
-        """
         command = f"RUN_CUSTOM {function_code}"
         self.send_command(command)
 
     def system_diagnostics(self):
-        """
-        Request system diagnostics from the device.
-        """
         command = "DIAGNOSTICS"
         self.send_command(command)
-        # Simulate a response.
         return "Diagnostics: All systems nominal."
 
 def user_command_listener(controller: BionicEyeController):
@@ -284,8 +287,7 @@ def user_command_listener(controller: BionicEyeController):
             elif user_input.startswith("change_color"):
                 parts = user_input.split()
                 if len(parts) >= 2:
-                    color = parts[1]
-                    controller.change_iris_color(color)
+                    controller.change_iris_color(parts[1])
                 else:
                     print("Usage: change_color [color]")
             elif user_input.startswith("zoom"):
@@ -312,18 +314,15 @@ def user_command_listener(controller: BionicEyeController):
             elif user_input.startswith("ar"):
                 parts = user_input.split(maxsplit=1)
                 if len(parts) >= 2:
-                    overlay_data = parts[1]
-                    controller.activate_AR_overlay(overlay_data)
+                    controller.activate_AR_overlay(parts[1])
                 else:
                     print("Usage: ar [overlay_data]")
             elif user_input.lower() == "diag":
-                result = controller.system_diagnostics()
-                print(result)
+                print(controller.system_diagnostics())
             elif user_input.startswith("custom"):
                 parts = user_input.split(maxsplit=1)
                 if len(parts) >= 2:
-                    function_code = parts[1]
-                    controller.run_custom_function(function_code)
+                    controller.run_custom_function(parts[1])
                 else:
                     print("Usage: custom [function_code]")
             else:
@@ -333,29 +332,62 @@ def user_command_listener(controller: BionicEyeController):
         except Exception as e:
             print("Error:", e)
 
+def start_camera_interface():
+    """
+    Simulate the bionic eye's visual interface by first showing a boot screen
+    and then displaying a live camera feed.
+    Press 'q' in the camera window to exit the interface.
+    """
+    if cv2 is None or np is None:
+        print("Camera interface libraries not available. Cannot start camera interface.")
+        return
+
+    # Boot screen simulation
+    boot_screen = 255 * np.ones((480, 640, 3), dtype=np.uint8)
+    cv2.putText(boot_screen, "Booting Bionic Eye OS...", (30, 240),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2, cv2.LINE_AA)
+    cv2.imshow("Bionic Eye OS", boot_screen)
+    cv2.waitKey(3000)  # Display boot screen for 3 seconds
+    cv2.destroyWindow("Bionic Eye OS")
+
+    # Start camera feed
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Cannot open camera. Exiting camera interface.")
+        return
+
+    print("Camera interface started. Press 'q' in the window to exit.")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to capture frame from camera.")
+            break
+        cv2.imshow("Bionic Eye Vision", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
 if __name__ == '__main__':
-    # Attempt to initialize using USB; if that fails, fall back to wireless.
-    try:
-        controller = BionicEyeController(connection_type='usb')
-    except Exception as e:
-        print("USB initialization error:", e)
-        try:
-            controller = BionicEyeController(connection_type='wireless', port='/dev/ttyUSB0')
-        except Exception as e2:
-            print("Wireless initialization error:", e2)
-            print("Unable to initialize any connection. Exiting.")
-            sys.exit(1)
+    # Initialize the bionic eye controller in simulation mode (if hardware is missing)
+    controller = BionicEyeController(connection_type='usb')
+    # (The __init__ method now prints simulation messages instead of raising errors.)
 
-
-    # Start the user command listener in a background thread.
+    # Start the command-line interface in a background thread.
     command_thread = threading.Thread(target=user_command_listener, args=(controller,))
     command_thread.daemon = True
     command_thread.start()
 
-    # Main background loop—for example, to periodically check device status.
+    # Start the camera interface (this simulates the user's vision when the OS boots up)
+    if cv2 is not None and np is not None:
+        camera_thread = threading.Thread(target=start_camera_interface)
+        camera_thread.daemon = True
+        camera_thread.start()
+
+    # Main loop: wait until the command thread finishes
     try:
         while command_thread.is_alive():
-            # Here you might poll sensors, update AR overlays, or manage power dynamically.
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nShutting down the Bionic Eye Controller.")
