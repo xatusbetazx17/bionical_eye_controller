@@ -132,7 +132,7 @@ def install_package(package_name):
     except subprocess.CalledProcessError as e:
         print(f"Failed to install {package_name}: {e}")
 
-# Auto-install and import PyUSB
+# Auto-install and import required packages
 try:
     import usb.core
     import usb.util
@@ -145,7 +145,6 @@ except ImportError:
         print("PyUSB not installed. USB functionality will be simulated.", e)
         usb = None
 
-# Auto-install and import PySerial
 try:
     import serial
 except ImportError:
@@ -156,7 +155,6 @@ except ImportError:
         print("PySerial not installed. Wireless functionality will be simulated.", e)
         serial = None
 
-# Auto-install and import OpenCV (cv2)
 try:
     import cv2
 except ImportError:
@@ -167,7 +165,6 @@ except ImportError:
         print("cv2 (opencv-python) not installed. Camera interface will be simulated.", e)
         cv2 = None
 
-# Auto-install and import numpy
 try:
     import numpy as np
 except ImportError:
@@ -178,7 +175,6 @@ except ImportError:
         print("numpy not installed. Image processing will be simulated.", e)
         np = None
 
-# Auto-install and import MediaPipe for hand tracking
 try:
     import mediapipe as mp
 except ImportError:
@@ -211,70 +207,122 @@ def log_firmware_update(update_method):
 class BionicEyeController:
     """
     A conceptual controller for a bionic eye device.
-    This class abstracts the communication interface (USB or wireless).
-    If hardware is not found, it falls back to simulation.
+    This class automatically detects the connection type (USB or wireless).
+    If no hardware is detected, it falls back to simulation.
     """
-    def __init__(self, connection_type='usb', port=None, debug=True):
-        self.connection_type = connection_type
+    def __init__(self, connection_type="auto", port=None, debug=True):
         self.debug = debug
+        self.device = None
+        self.ser = None
 
-        if self.connection_type == 'usb':
-            if usb is None:
-                if self.debug:
-                    print("USB module not available; simulating USB connection.")
-                self.device = None
+        # Auto-detect connection if requested.
+        if connection_type == "auto":
+            self.auto_detect_connection(port)
+        else:
+            self.connection_type = connection_type
+            if self.connection_type == "usb":
+                self.initialize_usb()
+            elif self.connection_type == "wireless":
+                self.initialize_wireless(port)
             else:
-                self.device = usb.core.find(idVendor=0x1234, idProduct=0x5678)
-                if self.device is None:
-                    if self.debug:
-                        print("USB device not found. Simulating USB connection.")
-                    self.device = None
-                else:
-                    try:
-                        self.device.set_configuration()
-                        if self.debug:
-                            print("USB device initialized.")
-                    except Exception as e:
-                        if self.debug:
-                            print("Failed to set USB configuration. Simulating USB connection:", e)
-                        self.device = None
-        elif self.connection_type == 'wireless':
-            if serial is None:
-                if self.debug:
-                    print("Serial module not available; simulating wireless connection.")
-                self.ser = None
-            else:
-                if port is None:
-                    port = '/dev/ttyUSB0'
+                raise ValueError("Unsupported connection type: " + self.connection_type)
+
+    def auto_detect_connection(self, port):
+        """Auto-detects and sets connection type: tries USB first, then wireless."""
+        # Try USB detection if pyusb is available.
+        if usb is not None:
+            self.device = usb.core.find(idVendor=0x1234, idProduct=0x5678)
+            if self.device is not None:
                 try:
-                    self.ser = serial.Serial(port, baudrate=115200, timeout=1)
+                    self.device.set_configuration()
+                    self.connection_type = "usb"
                     if self.debug:
-                        print("Wireless device initialized on port:", port)
+                        print("Auto-detected USB device. Using USB connection.")
+                    return
                 except Exception as e:
                     if self.debug:
-                        print("Wireless device initialization failed. Simulating wireless connection:", e)
-                    self.ser = None
+                        print("USB device detected but failed configuration:", e)
+                    self.device = None
+
+        # If USB not found, try wireless detection using pyserial.
+        if serial is not None:
+            # List of common serial ports (customize as needed)
+            possible_ports = ["/dev/ttyUSB0", "/dev/ttyACM0", "COM3", "COM4"]
+            for p in possible_ports:
+                try:
+                    self.ser = serial.Serial(p, baudrate=115200, timeout=1)
+                    self.connection_type = "wireless"
+                    if self.debug:
+                        print(f"Auto-detected wireless device on port {p}. Using wireless connection.")
+                    return
+                except Exception as e:
+                    if self.debug:
+                        print(f"Port {p} not available: {e}")
+                    continue
+
+        # If neither USB nor wireless is detected, use simulation.
+        self.connection_type = "simulation"
+        if self.debug:
+            print("No hardware detected. Running in simulation mode.")
+
+    def initialize_usb(self):
+        """Initializes USB connection."""
+        if usb is None:
+            if self.debug:
+                print("USB module not available; simulating USB connection.")
+            self.device = None
+            return
+        self.device = usb.core.find(idVendor=0x1234, idProduct=0x5678)
+        if self.device is None:
+            if self.debug:
+                print("USB device not found. Simulating USB connection.")
         else:
-            raise ValueError("Unsupported connection type: " + self.connection_type)
+            try:
+                self.device.set_configuration()
+                if self.debug:
+                    print("USB device initialized.")
+            except Exception as e:
+                if self.debug:
+                    print("Failed to set USB configuration. Simulating USB connection:", e)
+                self.device = None
+
+    def initialize_wireless(self, port):
+        """Initializes wireless (serial) connection."""
+        if serial is None:
+            if self.debug:
+                print("Serial module not available; simulating wireless connection.")
+            self.ser = None
+            return
+        if port is None:
+            port = '/dev/ttyUSB0'
+        try:
+            self.ser = serial.Serial(port, baudrate=115200, timeout=1)
+            if self.debug:
+                print("Wireless device initialized on port:", port)
+        except Exception as e:
+            if self.debug:
+                print("Wireless device initialization failed. Simulating wireless connection:", e)
+            self.ser = None
 
     def send_command(self, command: str):
         """
         Sends a command string to the bionic eye device.
+        In simulation mode, simply prints the command.
         """
-        if self.connection_type == 'usb':
+        if self.connection_type == "usb":
             if self.device is None:
                 print(f"[USB Simulation] Command sent: {command}")
             else:
-                # Actual USB transmission code would be here.
+                # Insert actual USB communication code here.
                 print(f"[USB] Sending command: {command}")
-        elif self.connection_type == 'wireless':
+        elif self.connection_type == "wireless":
             if self.ser is None:
                 print(f"[Wireless Simulation] Command sent: {command}")
             else:
                 self.ser.write((command + "\n").encode('ascii'))
                 print(f"[Wireless] Sending command: {command}")
         else:
-            print("Unknown connection type; cannot send command.")
+            print(f"[Simulation] Command sent: {command}")
 
     # Existing feature methods
     def change_iris_color(self, color: str):
@@ -337,19 +385,14 @@ class BionicEyeController:
     def set_eye_appearance(self, appearance: str):
         """
         Sets the eye appearance to a predefined pattern.
-        For example: Default, Sharingan, Mangekyou Sharingan, Sage Mode, Tenseigan, Rinnegan.
+        Example appearances: Default, Sharingan, Mangekyou Sharingan, Sage Mode, Tenseigan, Rinnegan.
         """
         command = f"SET_APPEARANCE {appearance}"
         self.send_command(command)
+        print(f"Appearance set to {appearance}")
 
-# Sub-interface for firmware update
+# Sub-interface for firmware update (unchanged from earlier)
 def firmware_update_interface(controller):
-    """
-    Displays a firmware update sub-menu with two options:
-      - Local File
-      - Online Update
-    The user selects an option by dwelling their hand pointer over it.
-    """
     if cv2 is None or np is None or mp is None:
         print("Necessary libraries not available. Simulating firmware update...")
         feedback_message = controller.update_firmware(update_method="online")
@@ -547,7 +590,6 @@ def appearance_customization_interface(controller):
 
         cv2.putText(frame, "Select Appearance", (menu_x, menu_y - 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-
         if feedback_message and (current_time - feedback_timestamp) < feedback_duration:
             cv2.putText(frame, feedback_message, (menu_x, menu_y + len(appearance_options)*option_height + 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
@@ -571,7 +613,7 @@ def hand_control_interface(controller):
     Displays a live camera feed with a toggleable hand-controlled menu.
     The main menu shows all available functions:
       - Customize Appearance (opens appearance sub-menu)
-      - Change Color (direct color command)
+      - Change Color
       - Zoom
       - Night Vision
       - Infrared
@@ -602,7 +644,7 @@ def hand_control_interface(controller):
     toggle_region_center = (frame_width - 40, 40)
     toggle_region_radius = 30
 
-    # Main menu options now include "Customize Appearance"
+    # Main menu options including "Customize Appearance"
     menu_options = [
         "Customize Appearance",
         "Change Color",
@@ -660,7 +702,7 @@ def hand_control_interface(controller):
             smoothed_pointer = None
 
         current_time = time.time()
-        # Draw toggle region
+        # Draw toggle region for menu
         cv2.circle(frame, toggle_region_center, toggle_region_radius, (200, 200, 200), 2)
         cv2.putText(frame, "Menu", (toggle_region_center[0] - 30, toggle_region_center[1] + 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
@@ -704,7 +746,6 @@ def hand_control_interface(controller):
                             appearance_customization_interface(controller)
                             feedback_message = "Appearance customization complete."
                         elif option == "Change Color":
-                            # For Change Color, we can use a default color or extend to allow arbitrary input.
                             controller.change_iris_color("#FF0000")
                             feedback_message = "Iris color changed to #FF0000"
                         elif option == "Zoom":
@@ -754,9 +795,9 @@ def hand_control_interface(controller):
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    # Initialize the bionic eye controller (simulate USB connection if hardware is missing)
-    controller = BionicEyeController(connection_type='usb', debug=True)
-    # Launch the hand-controlled interface with a full integrated menu
+    # Auto-detect connection type and initialize the bionic eye controller
+    controller = BionicEyeController(connection_type="auto", debug=True)
+    # Launch the hand-controlled interface with the full integrated menu of capabilities
     hand_control_interface(controller)
 
 ~~~
