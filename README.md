@@ -116,6 +116,7 @@ import subprocess
 import sys
 import threading
 import time
+import sqlite3
 
 def install_package(package_name):
     """
@@ -188,11 +189,30 @@ except ImportError:
         print("mediapipe not installed. Hand control interface will be simulated.", e)
         mp = None
 
+def log_firmware_update(update_method):
+    """Logs a firmware update event into a local SQLite database."""
+    try:
+        conn = sqlite3.connect("user_preferences.db")
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS firmware_updates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                update_method TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        c.execute("INSERT INTO firmware_updates (update_method) VALUES (?)", (update_method,))
+        conn.commit()
+        conn.close()
+        print("Firmware update logged in database.")
+    except Exception as e:
+        print("Failed to log firmware update:", e)
+
 class BionicEyeController:
     """
     A conceptual controller for a bionic eye device.
     This class abstracts the communication interface (USB or wireless).
-    If the expected hardware is not found, it falls back to simulation.
+    If hardware is not found, it falls back to simulation.
     """
     def __init__(self, connection_type='usb', port=None, debug=True):
         self.connection_type = connection_type
@@ -245,7 +265,7 @@ class BionicEyeController:
             if self.device is None:
                 print(f"[USB Simulation] Command sent: {command}")
             else:
-                # Actual USB command transmission code would go here.
+                # Actual USB transmission code would be here.
                 print(f"[USB] Sending command: {command}")
         elif self.connection_type == 'wireless':
             if self.ser is None:
@@ -256,7 +276,7 @@ class BionicEyeController:
         else:
             print("Unknown connection type; cannot send command.")
 
-    # Existing Feature Methods
+    # Existing feature methods
     def change_iris_color(self, color: str):
         command = f"SET_IRIS_COLOR {color}"
         self.send_command(command)
@@ -285,17 +305,20 @@ class BionicEyeController:
     def update_firmware(self, update_method="online"):
         """
         Simulate firmware update. 'update_method' can be "online" or "local".
+        Also logs the update event to a database.
         """
         if update_method == "online":
             command = "UPDATE_FIRMWARE_ONLINE"
             self.send_command(command)
+            log_firmware_update("online")
             return "Firmware update via online store initiated."
         else:
             command = "UPDATE_FIRMWARE_LOCAL"
             self.send_command(command)
+            log_firmware_update("local")
             return "Firmware update from local file initiated."
 
-    # New Feature Methods
+    # New feature methods
     def enable_infrared(self, enable: bool = True):
         command = "INFRARED_ON" if enable else "INFRARED_OFF"
         self.send_command(command)
@@ -311,19 +334,27 @@ class BionicEyeController:
         self.send_command(command)
         return "Battery: 85%"
 
-# Firmware update sub-interface using hand tracking (as part of the main interface)
+    def set_eye_appearance(self, appearance: str):
+        """
+        Sets the eye appearance to a predefined pattern.
+        For example: Default, Sharingan, Mangekyou Sharingan, Sage Mode, Tenseigan, Rinnegan.
+        """
+        command = f"SET_APPEARANCE {appearance}"
+        self.send_command(command)
+
+# Sub-interface for firmware update
 def firmware_update_interface(controller):
     """
     Displays a firmware update sub-menu with two options:
       - Local File
       - Online Update
-
-    The user selects one option by dwelling their hand pointer over it.
-    A feedback message is shown and then the interface simulates a minimal reboot.
+    The user selects an option by dwelling their hand pointer over it.
     """
     if cv2 is None or np is None or mp is None:
-        print("Necessary libraries not available. Cannot start firmware update interface.")
-        return
+        print("Necessary libraries not available. Simulating firmware update...")
+        feedback_message = controller.update_firmware(update_method="online")
+        time.sleep(2)
+        return feedback_message
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -339,10 +370,8 @@ def firmware_update_interface(controller):
     option_height = 50
     option_dwell_threshold = 1.5
     option_dwell_times = {option: None for option in sub_options}
-
     smoothed_pointer = None
     alpha = 0.3
-
     feedback_message = ""
     feedback_timestamp = time.time()
     feedback_duration = 3.0
@@ -357,7 +386,6 @@ def firmware_update_interface(controller):
 
         frame = cv2.flip(frame, 1)
         frame_h, frame_w, _ = frame.shape
-
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = mp.solutions.hands.Hands(max_num_hands=1).process(image_rgb)
         pointer = None
@@ -381,7 +409,6 @@ def firmware_update_interface(controller):
             smoothed_pointer = None
 
         current_time = time.time()
-
         overlay = frame.copy()
         cv2.rectangle(overlay, (menu_x, menu_y), (menu_x + menu_width, menu_y + len(sub_options)*option_height), (50, 50, 50), -1)
         cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
@@ -429,10 +456,122 @@ def firmware_update_interface(controller):
     cv2.destroyWindow("Firmware Update")
     return feedback_message
 
+def appearance_customization_interface(controller):
+    """
+    Displays an appearance customization sub-menu with options for eye patterns:
+    Default, Sharingan, Mangekyou Sharingan, Sage Mode, Tenseigan, and Rinnegan.
+    The user selects an option by dwelling their hand pointer over it.
+    """
+    if cv2 is None or np is None or mp is None:
+        print("Necessary libraries not available. Simulating appearance customization...")
+        controller.set_eye_appearance("Default")
+        time.sleep(2)
+        return "Appearance set to Default"
+
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Camera not available for appearance customization. Simulating selection...")
+        controller.set_eye_appearance("Default")
+        time.sleep(2)
+        return "Appearance set to Default"
+
+    appearance_options = ["Default", "Sharingan", "Mangekyou Sharingan", "Sage Mode", "Tenseigan", "Rinnegan"]
+    menu_x = 100
+    menu_y = 150
+    menu_width = 300
+    option_height = 50
+    option_dwell_threshold = 1.5
+    option_dwell_times = {option: None for option in appearance_options}
+    smoothed_pointer = None
+    alpha = 0.3
+    feedback_message = ""
+    feedback_timestamp = time.time()
+    feedback_duration = 3.0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to capture frame for appearance customization. Simulating selection...")
+            controller.set_eye_appearance("Default")
+            time.sleep(2)
+            break
+
+        frame = cv2.flip(frame, 1)
+        frame_h, frame_w, _ = frame.shape
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = mp.solutions.hands.Hands(max_num_hands=1).process(image_rgb)
+        pointer = None
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                x = hand_landmarks.landmark[8].x * frame_w
+                y = hand_landmarks.landmark[8].y * frame_h
+                pointer = (int(x), int(y))
+                break
+
+        if pointer is not None:
+            if smoothed_pointer is None:
+                smoothed_pointer = pointer
+            else:
+                smoothed_pointer = (
+                    int(alpha * pointer[0] + (1 - alpha) * smoothed_pointer[0]),
+                    int(alpha * pointer[1] + (1 - alpha) * smoothed_pointer[1])
+                )
+            cv2.circle(frame, smoothed_pointer, 5, (0, 255, 0), -1)
+        else:
+            smoothed_pointer = None
+
+        current_time = time.time()
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (menu_x, menu_y), (menu_x + menu_width, menu_y + len(appearance_options)*option_height), (50, 50, 50), -1)
+        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+
+        for idx, option in enumerate(appearance_options):
+            ox = menu_x
+            oy = menu_y + idx * option_height
+            cv2.rectangle(frame, (ox, oy), (ox + menu_width, oy + option_height), (100, 100, 100), 1)
+            cv2.putText(frame, option, (ox + 10, oy + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            if smoothed_pointer is not None and ox <= smoothed_pointer[0] <= ox + menu_width and oy <= smoothed_pointer[1] <= oy + option_height:
+                if option_dwell_times[option] is None:
+                    option_dwell_times[option] = current_time
+                dwell = current_time - option_dwell_times[option]
+                prog_width = int((dwell / option_dwell_threshold) * menu_width)
+                prog_width = min(prog_width, menu_width)
+                cv2.rectangle(frame, (ox, oy), (ox + prog_width, oy + option_height), (0, 255, 0), -1)
+                if dwell >= option_dwell_threshold:
+                    controller.set_eye_appearance(option)
+                    feedback_message = f"Appearance set to {option}"
+                    feedback_timestamp = current_time
+                    break
+            else:
+                option_dwell_times[option] = None
+
+        cv2.putText(frame, "Select Appearance", (menu_x, menu_y - 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+        if feedback_message and (current_time - feedback_timestamp) < feedback_duration:
+            cv2.putText(frame, feedback_message, (menu_x, menu_y + len(appearance_options)*option_height + 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        elif (current_time - feedback_timestamp) >= feedback_duration and feedback_message:
+            cv2.putText(frame, "Restarting view...", (menu_x, menu_y + len(appearance_options)*option_height + 80),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            cv2.imshow("Appearance Customization", frame)
+            cv2.waitKey(2000)
+            break
+
+        cv2.imshow("Appearance Customization", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyWindow("Appearance Customization")
+    return feedback_message
+
 def hand_control_interface(controller):
     """
-    Displays a live camera feed with a toggleable hand-controlled menu that lets the user select among the following options:
-      - Change Color
+    Displays a live camera feed with a toggleable hand-controlled menu.
+    The main menu shows all available functions:
+      - Customize Appearance (opens appearance sub-menu)
+      - Change Color (direct color command)
       - Zoom
       - Night Vision
       - Infrared
@@ -441,8 +580,6 @@ def hand_control_interface(controller):
       - Diagnostics
       - Battery
       - Update (launches firmware update sub-menu)
-      - Custom
-    The pointer (index finger tip) is smoothed for smoother control.
     Press 'q' to exit the interface.
     """
     if cv2 is None or np is None or mp is None:
@@ -465,8 +602,9 @@ def hand_control_interface(controller):
     toggle_region_center = (frame_width - 40, 40)
     toggle_region_radius = 30
 
-    # Define main menu options (aggregating all available functions)
+    # Main menu options now include "Customize Appearance"
     menu_options = [
+        "Customize Appearance",
         "Change Color",
         "Zoom",
         "Night Vision",
@@ -475,8 +613,7 @@ def hand_control_interface(controller):
         "Capture Photo",
         "Diagnostics",
         "Battery",
-        "Update",
-        "Custom"
+        "Update"
     ]
     menu_x = 50
     menu_y = 100
@@ -488,7 +625,6 @@ def hand_control_interface(controller):
     feedback_message = ""
     feedback_timestamp = time.time()
     feedback_duration = 3.0
-
     smoothed_pointer = None
     alpha = 0.3
 
@@ -500,11 +636,9 @@ def hand_control_interface(controller):
 
         frame = cv2.flip(frame, 1)
         frame_h, frame_w, _ = frame.shape
-
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = hands.process(image_rgb)
         pointer = None
-
         if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
                 mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
@@ -526,13 +660,11 @@ def hand_control_interface(controller):
             smoothed_pointer = None
 
         current_time = time.time()
-
-        # Draw toggle region for opening/closing the menu
+        # Draw toggle region
         cv2.circle(frame, toggle_region_center, toggle_region_radius, (200, 200, 200), 2)
         cv2.putText(frame, "Menu", (toggle_region_center[0] - 30, toggle_region_center[1] + 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
-        # Check if pointer is within toggle region to open/close menu
         if smoothed_pointer is not None:
             dx = smoothed_pointer[0] - toggle_region_center[0]
             dy = smoothed_pointer[1] - toggle_region_center[1]
@@ -550,12 +682,10 @@ def hand_control_interface(controller):
             else:
                 menu_toggle_dwell = None
 
-        # If menu is open, display the menu options and handle dwell selection
         if menu_open:
             overlay = frame.copy()
             cv2.rectangle(overlay, (menu_x, menu_y), (menu_x + menu_width, menu_y + len(menu_options)*option_height), (50, 50, 50), -1)
             cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
-
             for idx, option in enumerate(menu_options):
                 ox = menu_x
                 oy = menu_y + idx * option_height
@@ -570,7 +700,11 @@ def hand_control_interface(controller):
                     cv2.rectangle(frame, (ox, oy), (ox + prog_width, oy + option_height), (0, 255, 0), -1)
                     if option_dwell >= option_dwell_threshold:
                         print(f"Option selected: {option}")
-                        if option == "Change Color":
+                        if option == "Customize Appearance":
+                            appearance_customization_interface(controller)
+                            feedback_message = "Appearance customization complete."
+                        elif option == "Change Color":
+                            # For Change Color, we can use a default color or extend to allow arbitrary input.
                             controller.change_iris_color("#FF0000")
                             feedback_message = "Iris color changed to #FF0000"
                         elif option == "Zoom":
@@ -598,9 +732,6 @@ def hand_control_interface(controller):
                             cv2.waitKey(500)
                             firmware_update_interface(controller)
                             feedback_message = "Firmware update completed."
-                        elif option == "Custom":
-                            controller.run_custom_function("CUSTOM_COMMAND")
-                            feedback_message = "Custom function executed"
                         menu_open = False
                         option_dwell_times = {opt: None for opt in menu_options}
                         feedback_timestamp = current_time
@@ -609,8 +740,6 @@ def hand_control_interface(controller):
 
         cv2.putText(frame, "Hand Control Interface", (menu_x, menu_y - 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
-
-        # Display feedback message, if any
         if feedback_message and (current_time - feedback_timestamp) < feedback_duration:
             cv2.putText(frame, feedback_message, (menu_x, menu_y + len(menu_options)*option_height + 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
@@ -627,7 +756,7 @@ def hand_control_interface(controller):
 if __name__ == '__main__':
     # Initialize the bionic eye controller (simulate USB connection if hardware is missing)
     controller = BionicEyeController(connection_type='usb', debug=True)
-    # Launch the hand-controlled interface with integrated menu for all functions
+    # Launch the hand-controlled interface with a full integrated menu
     hand_control_interface(controller)
 
 ~~~
