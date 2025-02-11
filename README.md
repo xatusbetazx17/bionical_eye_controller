@@ -116,6 +116,7 @@ import subprocess
 import sys
 import time
 import sqlite3
+import threading
 
 # --- Dependency Auto-Installation ---
 def install_package(package_name):
@@ -130,13 +131,14 @@ def install_package(package_name):
     except subprocess.CalledProcessError as e:
         print(f"Failed to install {package_name}: {e}")
 
-# Try to import required libraries and auto-install if missing.
+# Required packages for hardware and vision.
 for pkg, module in [
     ("pyusb", "usb"),
     ("pyserial", "serial"),
     ("opencv-python", "cv2"),
     ("numpy", "numpy"),
-    ("mediapipe", "mp")
+    ("mediapipe", "mp"),
+    ("SpeechRecognition", "speech_recognition")
 ]:
     try:
         __import__(module)
@@ -165,6 +167,10 @@ try:
     import mediapipe as mp
 except ImportError:
     mp = None
+try:
+    import speech_recognition as sr
+except ImportError:
+    sr = None
 
 # --- Database Logging for Firmware Updates ---
 def log_firmware_update(update_method):
@@ -191,7 +197,7 @@ class BionicEyeController:
     """
     A conceptual controller for a bionic eye device.
     Automatically detects the connection type (USB, wireless, or simulation).
-    Provides methods for all features including advanced AI enhancements.
+    Provides methods for basic and advanced features.
     """
     def __init__(self, connection_type="auto", port=None, debug=True):
         self.debug = debug
@@ -341,7 +347,7 @@ class BionicEyeController:
     def set_eye_appearance(self, appearance: str):
         """
         Set the eye appearance to a specific pattern.
-        Acceptable options: Default, Sharingan, Mangekyou Sharingan, Sage Mode, Tenseigan, Rinnegan.
+        Options: Default, Sharingan, Mangekyou Sharingan, Sage Mode, Tenseigan, Rinnegan.
         """
         self.send_command(f"SET_APPEARANCE {appearance}")
         print(f"Appearance set to {appearance}")
@@ -362,20 +368,66 @@ class BionicEyeController:
         self.send_command("SCENE_SEGMENTATION")
         print("Scene segmentation activated.")
 
+# --- Voice Command Interface ---
+def voice_command_listener(controller):
+    """
+    Continuously listens for voice commands and maps them to controller functions.
+    Uses the SpeechRecognition library.
+    """
+    if sr is None:
+        print("Voice recognition library not available.")
+        return
+    recognizer = sr.Recognizer()
+    mic = sr.Microphone()
+    # Define a simple mapping of phrases to controller methods.
+    commands = {
+        "change color": lambda: controller.change_iris_color("#FF0000"),
+        "zoom": lambda: controller.set_zoom_level(2.0),
+        "night vision": lambda: controller.enable_night_vision(True),
+        "infrared": lambda: controller.enable_infrared(True),
+        "ar overlay": lambda: controller.activate_AR_overlay("Default AR Overlay"),
+        "capture photo": lambda: print(controller.capture_photo()),
+        "diagnostics": lambda: print(controller.system_diagnostics()),
+        "battery": lambda: print(controller.check_battery()),
+        "update": lambda: print(controller.update_firmware("online")),
+        "ai enhance": lambda: controller.ai_enhance_vision(),
+        "auto contrast": lambda: controller.auto_contrast(),
+        "scene segmentation": lambda: controller.scene_segmentation(),
+        "customize appearance": lambda: appearance_customization_interface(controller)
+    }
+    with mic as source:
+        recognizer.adjust_for_ambient_noise(source)
+    print("Voice command listener active. Say a command...")
+    while True:
+        try:
+            with mic as source:
+                audio = recognizer.listen(source, phrase_time_limit=3)
+            command_text = recognizer.recognize_google(audio).lower()
+            print(f"Voice recognized: {command_text}")
+            for phrase, action in commands.items():
+                if phrase in command_text:
+                    action()
+                    break
+        except sr.UnknownValueError:
+            pass  # Could not understand audio
+        except sr.RequestError as e:
+            print(f"Voice recognition error: {e}")
+        # To allow graceful exit if needed, check a global flag or similar (omitted for brevity).
+
 # --- Sub-Interface: Firmware Update ---
 def firmware_update_interface(controller):
     """Displays a firmware update sub-menu."""
     if cv2 is None or np is None or mp is None:
         print("Necessary libraries missing. Simulating firmware update...")
         feedback = controller.update_firmware(update_method="online")
-        time.sleep(2)
+        time.sleep(1)
         return feedback
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Camera not available. Simulating firmware update...")
         feedback = controller.update_firmware(update_method="online")
-        time.sleep(2)
+        time.sleep(1)
         return feedback
 
     sub_options = ["Local File", "Online Update"]
@@ -392,7 +444,7 @@ def firmware_update_interface(controller):
         ret, frame = cap.read()
         if not ret:
             feedback = controller.update_firmware(update_method="online")
-            time.sleep(2)
+            time.sleep(1)
             break
         frame = cv2.flip(frame, 1)
         frame_h, frame_w, _ = frame.shape
@@ -470,14 +522,14 @@ def appearance_customization_interface(controller):
     if cv2 is None or np is None or mp is None:
         print("Libraries missing. Simulating appearance customization...")
         controller.set_eye_appearance("Default")
-        time.sleep(2)
+        time.sleep(1)
         return "Appearance set to Default"
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Camera not available. Simulating appearance selection...")
         controller.set_eye_appearance("Default")
-        time.sleep(2)
+        time.sleep(1)
         return "Appearance set to Default"
 
     appearance_options = ["Default", "Sharingan", "Mangekyou Sharingan", "Sage Mode", "Tenseigan", "Rinnegan"]
@@ -495,7 +547,7 @@ def appearance_customization_interface(controller):
         if not ret:
             print("Failed to capture frame. Simulating appearance selection...")
             controller.set_eye_appearance("Default")
-            time.sleep(2)
+            time.sleep(1)
             break
 
         frame = cv2.flip(frame, 1)
@@ -567,7 +619,7 @@ def appearance_customization_interface(controller):
     cv2.destroyWindow("Appearance Customization")
     return feedback
 
-# --- Main Hand-Controlled Interface with Scrolling Menu ---
+# --- Main Hand-Controlled Interface with Scrolling Menu and Voice Commands ---
 def hand_control_interface(controller):
     """
     Displays a live camera feed with a toggleable, hand-controlled, scrollable menu.
@@ -585,11 +637,17 @@ def hand_control_interface(controller):
       - AI Enhance (activates AI-based vision enhancement)
       - Auto Contrast (automatically adjusts contrast)
       - Scene Segmentation (activates scene segmentation)
+    Additionally, a separate voice command listener runs in parallel to accept spoken commands.
     Press 'q' to exit.
     """
     if cv2 is None or np is None or mp is None:
         print("Necessary libraries not available. Exiting interface.")
         return
+
+    # Start voice command listener in a separate thread.
+    if sr is not None:
+        voice_thread = threading.Thread(target=voice_command_listener, args=(controller,), daemon=True)
+        voice_thread.start()
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -696,21 +754,16 @@ def hand_control_interface(controller):
             # Check pointer vertical position for scrolling.
             if smoothed_pointer is not None:
                 pointer_y = smoothed_pointer[1]
-                # If pointer is near the top of the visible menu, scroll up.
                 if pointer_y < menu_y + 0.2 * visible_menu_height and scroll_offset > 0:
                     scroll_offset -= 1
-                    time.sleep(0.2)
-                # If pointer is near the bottom, scroll down.
+                    time.sleep(0.1)  # Reduced sleep for faster scrolling
                 elif pointer_y > menu_y + 0.8 * visible_menu_height and scroll_offset < len(menu_options) - visible_count:
                     scroll_offset += 1
-                    time.sleep(0.2)
-
+                    time.sleep(0.1)
             # Draw the visible menu box.
             overlay = frame.copy()
             cv2.rectangle(overlay, (menu_x, menu_y), (menu_x+menu_width, menu_y+visible_menu_height), (50,50,50), -1)
             cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
-
-            # Draw only the options that are visible.
             for idx in range(visible_count):
                 actual_idx = idx + scroll_offset
                 if actual_idx >= len(menu_options):
@@ -795,6 +848,7 @@ if __name__ == '__main__':
     controller = BionicEyeController(connection_type="auto", debug=True)
     # Launch the hand-controlled interface with the scrollable menu.
     hand_control_interface(controller)
+
 
 ~~~
         
