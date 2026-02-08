@@ -1,6 +1,9 @@
 # Bionic Eye Controller
 
 A conceptual Python program for controlling a simulated bionic eye device with augmented features such as changing iris color, zoom, night vision, augmented reality overlays, and more. This project demonstrates auto-installation of dependencies (using the `--break-system-packages` flag) and simulates USB/wireless communication with the device.
+# Lookslike
+
+![Image](images/my%20screenshot.png)
 
 > **Warning:**  
 > This code is purely conceptual and for educational purposes only. It is not intended for production use or interfacing with actual medical devices. It is highly recommended to use a virtual environment for development to avoid system-wide package issues.
