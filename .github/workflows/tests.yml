@@ -1,0 +1,40 @@
+name: Software checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install desktop test display
+        run: sudo apt-get update && sudo apt-get install -y xvfb python3-tk
+      - name: Install project and test tools
+        run: python -m pip install '.[dev,camera,hardware]'
+      - name: Check Python correctness
+        run: ruff check --select E9,F63,F7,F82 src tests examples
+      - name: Run unit, protocol, video, serial, CLI and desktop tests
+        run: xvfb-run -a python -m unittest discover -s tests -v
+      - name: Build distributable packages
+        run: python -m build
+      - name: Test installed wheel outside the checkout
+        shell: bash
+        run: |
+          python -m venv /tmp/bionic-wheel-test
+          /tmp/bionic-wheel-test/bin/python -m pip install dist/*.whl
+          cd /tmp
+          /tmp/bionic-wheel-test/bin/bionic-eye demo --output /tmp/wheel-demo.png --zoom 2 --low-light
+          /tmp/bionic-wheel-test/bin/bionic-eye diagnostics
